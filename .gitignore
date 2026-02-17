@@ -1,0 +1,14 @@
+# Configuración local de cada máquina (contiene rutas absolutas)
+.auto-updater.env
+
+# Script generado por el setup con rutas locales
+start-updater.sh
+
+# Log de ejecución
+*.log
+
+# macOS
+.DS_Store
+
+# Node (por si acaso)
+node_modules/

@@ -1,0 +1,57 @@
+# auto-updater.service
+#
+# Cómo instalar en Linux (Ubuntu):
+# ─────────────────────────────────────────────────────────────
+#   1. Copiar este archivo:
+#      sudo cp auto-updater.service /etc/systemd/system/auto-updater.service
+#
+#   2. Recargar systemd:
+#      sudo systemctl daemon-reload
+#
+#   3. Habilitar para que arranque con el sistema:
+#      sudo systemctl enable auto-updater
+#
+#   4. Iniciar ahora:
+#      sudo systemctl start auto-updater
+#
+#   5. Ver logs en vivo:
+#      sudo journalctl -u auto-updater -f
+# ─────────────────────────────────────────────────────────────
+
+[Unit]
+Description=Auto-Updater para repositorio Node.js
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# ── AJUSTAR ESTOS VALORES ──────────────────────────────────────
+# Usuario que ejecuta el servicio (debe tener acceso al repo y a git)
+User=tu-usuario
+
+# Directorio donde está auto-updater.js
+WorkingDirectory=/ruta/donde/pusiste/auto-updater
+
+# Ruta completa a Node.js (verificar con: which node)
+ExecStart=/usr/bin/node /ruta/donde/pusiste/auto-updater/auto-updater.js
+# ──────────────────────────────────────────────────────────────
+
+# Variables de entorno (alternativa a editar el script directamente)
+Environment="REPO_PATH=/ruta/a/tu/repositorio"
+Environment="BRANCH=main"
+Environment="INTERVAL_MINUTES=30"
+Environment="RESTART_CMD=systemctl restart nombre-de-tu-servicio"
+Environment="RUN_NPM_INSTALL=true"
+Environment="RUN_MAKE_BUILD=true"
+Environment="LOG_FILE=/var/log/auto-updater.log"
+
+# Reiniciar si crashea
+Restart=on-failure
+RestartSec=30s
+
+# Esperar que la red esté lista antes de primer chequeo
+ExecStartPre=/bin/sleep 10
+
+[Install]
+WantedBy=multi-user.target
