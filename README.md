@@ -24,7 +24,8 @@ Si no hay cambios, no hace nada y espera al siguiente intervalo. Si hay cambios 
 | Archivo | Descripción |
 |---|---|
 | `auto-updater.js` | Script principal. Es el único que corre |
-| `setup-auto-updater.sh` | Instalador interactivo (recomendado para empezar) |
+| `setup-auto-updater.sh` | Instalador interactivo del auto-updater (recomendado para empezar) |
+| `first-run.sh` | Instalación inicial del repo monitoreado (npm install + build) |
 | `auto-updater.service` | Archivo de unidad para systemd (Linux) — referencia manual |
 
 ---
@@ -107,6 +108,26 @@ sudo systemctl start auto-updater
 
 ---
 
+---
+
+## Primera instalación en una máquina nueva
+
+Antes de arrancar el auto-updater por primera vez, el repositorio monitoreado necesita tener sus dependencias instaladas y el build generado. De lo contrario el servicio va a fallar al arrancar.
+
+Usá el script `first-run.sh` para hacer todo esto de una sola vez:
+
+```bash
+# Uso básico (solo instala deps y hace build)
+bash first-run.sh /ruta/al/repositorio
+
+# Con nombre de servicio (también arranca el servicio al terminar)
+bash first-run.sh /ruta/al/repositorio 3speakencoder.service
+```
+
+El script hace en orden: `npm install` → `npm run build` (si existe el script) → arranca el servicio systemd si se especificó.
+
+> **Nota:** El auto-updater también detecta automáticamente si falta el build al arrancar y lo genera solo. Pero usar `first-run.sh` es más explícito y permite ver el output completo del build antes de arrancar el servicio.
+
 ## Variables de entorno
 
 Podés configurar el updater sin editar el código fuente usando variables de entorno. Tienen prioridad sobre los valores en `CONFIG`.
@@ -118,6 +139,7 @@ Podés configurar el updater sin editar el código fuente usando variables de en
 | `INTERVAL_MINUTES` | Intervalo de polling | `60` |
 | `RESTART_CMD` | Comando de reinicio | `systemctl restart mi-app` |
 | `RUN_NPM_INSTALL` | Ejecutar npm install | `true` / `false` |
+| `RUN_NPM_BUILD` | Ejecutar npm run build (TypeScript/build script) | `true` / `false` |
 | `RUN_MAKE_BUILD` | Ejecutar make build | `true` / `false` |
 | `LOG_FILE` | Ruta del archivo de log | `/var/log/auto-updater.log` |
 
@@ -376,3 +398,55 @@ sed -i 's/\r//' setup-auto-updater.sh
 ## Licencia
 
 MIT
+
+---
+
+### ❌ El servicio falla con "Worker file not found" o similar al arrancar
+
+**Error en los logs:**
+```
+Worker file not found at /path/dist/workers/....js. Run "npm run build" first.
+```
+
+**Causa:** El repositorio fue clonado pero nunca se generó el build. La carpeta `dist/` no existe.
+
+**Solución rápida:**
+```bash
+sudo systemctl stop nombre-servicio.service
+cd /ruta/al/repositorio
+npm install
+npm run build
+sudo systemctl start nombre-servicio.service
+```
+
+**Solución permanente:** Usá `first-run.sh` en futuras instalaciones:
+```bash
+bash first-run.sh /ruta/al/repositorio nombre-servicio.service
+```
+
+---
+
+### ❌ El sudoers en Ubuntu 24 necesita `/usr/bin/systemctl` en vez de `/bin/systemctl`
+
+**Error en los logs:**
+```
+sudo: a terminal is required to read the password
+```
+
+A pesar de tener la línea en sudoers, sigue pidiendo contraseña porque en Ubuntu 24 `systemctl` está en `/usr/bin/systemctl` y no en `/bin/systemctl`.
+
+**Solución:** Verificar la ruta correcta y corregir sudoers:
+```bash
+# Verificar dónde está systemctl en tu sistema
+which systemctl
+```
+
+La línea en sudoers debe usar la ruta que devolvió ese comando:
+```
+# Ubuntu 22 y anteriores
+tu-usuario ALL=(ALL) NOPASSWD: /bin/systemctl restart nombre-servicio.service
+
+# Ubuntu 24+
+tu-usuario ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nombre-servicio.service
+```
+

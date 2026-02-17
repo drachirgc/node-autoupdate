@@ -11,7 +11,7 @@
  *   node auto-updater.js --interval 60 --branch main --restart-cmd "systemctl restart mi-servicio"
  */
 
-const { execSync, exec } = require("child_process");
+const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -31,12 +31,14 @@ const CONFIG = {
   // Cómo reiniciar el servicio. Opciones:
   //   "systemctl restart nombre-servicio"  → para systemd
   //   "pm2 restart nombre-o-id"            → para PM2
-  //   null                                 → no reinicia (útil si el updater
-  //                                          es parte del propio proceso)
+  //   null                                 → no reinicia
   restartCmd: process.env.RESTART_CMD || null,
 
-  // ¿Ejecutar npm install si cambia package.json o package-lock.json?
+  // ¿Ejecutar npm install si cambia package.json o lockfile?
   runNpmInstall: process.env.RUN_NPM_INSTALL !== "false",
+
+  // ¿Ejecutar npm run build si existe tsconfig.json o script "build" en package.json?
+  runNpmBuild: process.env.RUN_NPM_BUILD !== "false",
 
   // ¿Ejecutar make build si existe un Makefile?
   runMakeBuild: process.env.RUN_MAKE_BUILD !== "false",
@@ -106,6 +108,36 @@ function changedFiles(beforeHash, afterHash) {
   }
 }
 
+// Detecta si el proyecto tiene script "build" en package.json
+function hasBuildScript() {
+  try {
+    const pkgPath = path.join(CONFIG.repoPath, "package.json");
+    if (!fs.existsSync(pkgPath)) return false;
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    return !!(pkg.scripts && pkg.scripts.build);
+  } catch {
+    return false;
+  }
+}
+
+// Verifica si la carpeta dist/ existe y tiene contenido
+function buildExiste() {
+  const distPath = path.join(CONFIG.repoPath, "dist");
+  return fs.existsSync(distPath) && fs.readdirSync(distPath).length > 0;
+}
+
+// Detecta si cambiaron archivos que requieren rebuild
+function requiereBuild(archivosModificados) {
+  return archivosModificados.some(
+    (f) =>
+      f.endsWith(".ts") ||
+      f.endsWith(".tsx") ||
+      f === "tsconfig.json" ||
+      f === "tsconfig.build.json" ||
+      f.startsWith("src/")
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // LÓGICA PRINCIPAL
 // ─────────────────────────────────────────────────────────────
@@ -120,15 +152,34 @@ async function checkForUpdates() {
     return;
   }
 
+  // 2. Verificar que el build existe antes de cualquier cosa
+  //    Esto soluciona el caso de primera instalación sin build previo
+  if (CONFIG.runNpmBuild && hasBuildScript() && !buildExiste()) {
+    logger.warn("⚠ Carpeta dist/ no encontrada o vacía. Ejecutando build inicial...");
+    try {
+      if (fileExistsInRepo("package.json")) {
+        logger.info("📦 Ejecutando npm install...");
+        run("npm install");
+        logger.success("npm install completado.");
+      }
+      logger.info("🔨 Ejecutando npm run build...");
+      run("npm run build");
+      logger.success("✅ Build inicial completado. El servicio puede arrancar.");
+    } catch (err) {
+      logger.error(`Error en build inicial: ${err.message}`);
+      return;
+    }
+  }
+
   try {
-    // 2. Guardar el hash actual
+    // 3. Guardar el hash actual
     const hashAntes = run("git rev-parse HEAD");
     logger.info(`Hash actual: ${hashAntes.slice(0, 8)}`);
 
-    // 3. Fetch del remoto (solo descarga, no aplica)
+    // 4. Fetch del remoto (solo descarga, no aplica)
     run(`git fetch origin ${CONFIG.branch}`);
 
-    // 4. Comparar con el remoto
+    // 5. Comparar con el remoto
     const hashRemoto = run(`git rev-parse origin/${CONFIG.branch}`);
     logger.info(`Hash remoto: ${hashRemoto.slice(0, 8)}`);
 
@@ -137,7 +188,7 @@ async function checkForUpdates() {
       return;
     }
 
-    // 5. Hay cambios → aplicar
+    // 6. Hay cambios → aplicar
     logger.success(
       `🔄 Cambios detectados! Actualizando ${hashAntes.slice(0, 8)} → ${hashRemoto.slice(0, 8)}`
     );
@@ -149,14 +200,14 @@ async function checkForUpdates() {
       run("git stash");
     }
 
-    // 6. Git pull
+    // 7. Git pull
     const pullOutput = run(`git pull origin ${CONFIG.branch}`);
     logger.info(`git pull: ${pullOutput}`);
 
     const archivosModificados = changedFiles(hashAntes, hashRemoto);
     logger.info(`Archivos modificados: ${archivosModificados.join(", ")}`);
 
-    // 7. npm install (si cambiaron dependencias)
+    // 8. npm install (si cambiaron dependencias)
     const dependenciasModificadas = archivosModificados.some(
       (f) =>
         f === "package.json" ||
@@ -171,20 +222,29 @@ async function checkForUpdates() {
         run("npm install --omit=dev");
         logger.success("npm install completado.");
       } else {
-        logger.info(
-          "package.json sin cambios → saltando npm install (más rápido)."
-        );
+        logger.info("package.json sin cambios → saltando npm install.");
       }
     }
 
-    // 8. make build (si existe Makefile)
+    // 9. npm run build (si cambiaron archivos TypeScript o src/)
+    if (CONFIG.runNpmBuild && hasBuildScript()) {
+      if (requiereBuild(archivosModificados)) {
+        logger.info("🔨 Archivos fuente cambiaron → ejecutando npm run build...");
+        run("npm run build");
+        logger.success("npm run build completado.");
+      } else {
+        logger.info("Sin cambios en src/ o .ts → saltando npm run build.");
+      }
+    }
+
+    // 10. make build (si existe Makefile)
     if (CONFIG.runMakeBuild && fileExistsInRepo("Makefile")) {
       logger.info("🔨 Makefile encontrado → ejecutando make build...");
       run("make build");
       logger.success("make build completado.");
     }
 
-    // 9. Reiniciar el servicio
+    // 11. Reiniciar el servicio
     if (CONFIG.restartCmd) {
       logger.info(`🔁 Reiniciando servicio: ${CONFIG.restartCmd}`);
       run(CONFIG.restartCmd, "/");
