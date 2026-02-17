@@ -215,6 +215,164 @@ rm ~/Library/LaunchAgents/com.auto-updater.plist
 
 ---
 
+## Troubleshooting
+
+Problemas reales encontrados durante la instalación y cómo resolverlos.
+
+---
+
+### ❌ `Interactive authentication required` al reiniciar el servicio
+
+**Error en los logs:**
+```
+Failed to restart mi-servicio.service: Interactive authentication required.
+```
+
+**Causa:** El auto-updater corre como servicio de sistema y no tiene permisos para ejecutar `systemctl restart` sin contraseña.
+
+**Solución:** Darle permiso al usuario para reiniciar ese servicio específico sin sudo:
+
+```bash
+sudo visudo
+```
+
+Agregá esta línea al final del archivo (reemplazá los valores):
+```
+tu-usuario ALL=(ALL) NOPASSWD: /bin/systemctl restart nombre-de-tu-servicio.service
+```
+
+Luego editá el `.auto-updater.env` para agregar `sudo` al comando:
+
+```bash
+nano ~/auto-updater/.auto-updater.env
+```
+
+Cambiá la línea `RESTART_CMD`:
+```
+RESTART_CMD=sudo systemctl restart nombre-de-tu-servicio.service
+```
+
+Reiniciá el auto-updater para que tome los cambios:
+```bash
+sudo systemctl restart auto-updater
+sudo journalctl -u auto-updater -f
+```
+
+---
+
+### ❌ `src refspec main does not match any` al hacer git push
+
+**Error:**
+```
+error: src refspec main does not match any
+error: failed to push some refs to '...'
+```
+
+**Causa:** Git inicializó el repo con la rama `master` en lugar de `main`, o no se hizo el commit inicial antes del push.
+
+**Solución:**
+```bash
+# Verificar el estado
+git status
+
+# Si hay archivos sin commitear
+git add .
+git commit -m "Initial commit"
+
+# Renombrar la rama
+git branch -M main
+
+# Push
+git push -u origin main
+```
+
+---
+
+### ❌ `Repository not found` al hacer git push
+
+**Error:**
+```
+remote: Repository not found.
+fatal: repository 'https://github.com/...' not found
+```
+
+**Causa:** La URL del remote apunta a un repositorio que no existe, o se usó la URL de ejemplo sin reemplazarla.
+
+**Solución:** Actualizá la URL con la de tu repo real:
+
+```bash
+git remote set-url origin https://github.com/tu-usuario/tu-repo-real.git
+git push -u origin main
+```
+
+Podés verificar la URL configurada con:
+```bash
+git remote -v
+```
+
+---
+
+### ❓ ¿Cuál es la ruta absoluta del repositorio a monitorear?
+
+El setup pide una **ruta local en el disco**, no una URL de GitHub. Es la carpeta donde está clonado el repo en tu máquina.
+
+Para encontrarla:
+```bash
+# Buscar todos los repos git en el sistema
+find / -name ".git" -type d 2>/dev/null
+
+# O buscar en las carpetas más comunes
+ls /home/
+ls /var/www/
+ls /opt/
+```
+
+---
+
+### ❓ ¿Cuál es la rama correcta?
+
+Entrá a la carpeta del repo que querés monitorear y ejecutá:
+
+```bash
+cd /ruta/del/repo
+git branch
+```
+
+La rama activa aparece marcada con `*`. Normalmente es `main` o `master`.
+
+---
+
+### ❓ Los archivos `.sh` fallan en Linux/macOS después de editarlos en Windows
+
+**Causa:** Windows guarda los archivos con saltos de línea CRLF (`\r\n`) en lugar de LF (`\n`), lo que rompe los scripts bash en Unix.
+
+**Solución:** Creá un archivo `.gitattributes` en la raíz del repo con este contenido:
+
+```
+*.sh text eol=lf
+*.service text eol=lf
+*.js text eol=lf
+*.md text eol=lf
+.gitignore text eol=lf
+```
+
+Esto le indica a Git que siempre guarde esos archivos con LF sin importar desde qué sistema operativo se suban.
+
+Si el archivo ya fue subido con CRLF, corregilo así (en Linux/macOS):
+```bash
+sed -i 's/\r//' setup-auto-updater.sh
+```
+
+---
+
+### ❓ El auto-updater detectó cambios en el primer arranque sin haber hecho push
+
+**Comportamiento:** Al instalar, el auto-updater aplicó un pull y reinició el servicio aunque no se haya hecho ningún push nuevo.
+
+**Causa:** Es normal. El repo local estaba desactualizado respecto al remoto (había commits en GitHub que aún no se habían bajado). El auto-updater simplemente sincronizó el estado.
+
+---
+
 ## Licencia
 
 MIT
