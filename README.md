@@ -450,3 +450,17 @@ tu-usuario ALL=(ALL) NOPASSWD: /bin/systemctl restart nombre-servicio.service
 tu-usuario ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nombre-servicio.service
 ```
 
+
+---
+
+### ❓ No sé el nombre exacto del servicio en mi máquina
+
+El nombre del servicio puede variar entre máquinas aunque sea el mismo software (por ejemplo `3speakencoder.service` en una y `3speak-encoder.service` en otra).
+
+Para encontrar el nombre correcto:
+
+```bash
+sudo systemctl list-units --type=service --state=running | grep -iE "speak|encoder|ipfs|node"
+```
+
+Usá el nombre exacto que aparece en la primera columna para el `RESTART_CMD` y para el sudoers.
